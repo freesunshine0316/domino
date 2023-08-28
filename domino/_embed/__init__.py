@@ -22,7 +22,7 @@ encoders.register(robust, aliases=[])
 encoders.register(transformers, aliases=[])
 
 
-def infer_modality(col: mk.AbstractColumn):
+def infer_modality(col: mk.Column):
 
     if isinstance(col, mk.ImageColumn):
         return "image"
@@ -146,11 +146,11 @@ def _embed(
 
     def _prepare_input(x):
         if isinstance(x, mk.AbstractColumn):
-            x = x.data 
+            x = x.data
         if torch.is_tensor(x):
             x = x.to(device)
         return x
-    
+
     with torch.no_grad():
         data[out_col] = embed_input.map(
             lambda x: encode(_prepare_input(x)).cpu().detach().numpy(),
@@ -159,9 +159,7 @@ def _embed(
             batch_size=batch_size,
             num_workers=num_workers,
             mmap=mmap_dir is not None,
-            mmap_path=None
-            if mmap_dir is None
-            else os.path.join(mmap_dir, "emb_mmap.npy"),
+            mmap_path=None if mmap_dir is None else os.path.join(mmap_dir, "emb_mmap.npy"),
             flush_size=128,
         )
     return data

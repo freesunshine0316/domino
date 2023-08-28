@@ -18,7 +18,7 @@ def unpack_args(data: mk.DataPanel, *args):
     for arg in args:
         if isinstance(arg, str):
             arg = data[arg]
-        if isinstance(arg, mk.AbstractColumn):
+        if isinstance(arg, mk.Column):
             # this is necessary because torch.tensor() of a NumpyArrayColumn is very
             # slow and I don't want implementers to have to deal with casing on this
             arg = arg.data
@@ -41,6 +41,7 @@ def convert_to_numpy(*args):
 
     return tuple(new_args)
 
+
 def convert_to_torch(*args):
     new_args = []
     for arg in args:
@@ -48,8 +49,9 @@ def convert_to_torch(*args):
             new_args.append(torch.tensor(arg))
         else:
             new_args.append(arg)
-        
+
     return tuple(new_args)
+
 
 def nested_getattr(obj, attr, *args):
     """Get a nested property from an object.
@@ -73,7 +75,9 @@ class VariableColumn:
 
 
 def requires_columns(dp_arg: str, columns: Collection[str]):
+
     def _requires(fn: callable):
+
         @wraps(fn)
         def _wrapper(*args, aliases: Mapping[str, str] = None, **kwargs):
             args_dict = getcallargs(fn, *args, **kwargs)
@@ -86,17 +90,12 @@ def requires_columns(dp_arg: str, columns: Collection[str]):
                     dp[column] = dp[alias]
 
             # resolve variable columns
-            resolved_cols = [
-                (col.resolve(args_dict) if isinstance(col, VariableColumn) else col)
-                for col in columns
-            ]
+            resolved_cols = [(col.resolve(args_dict) if isinstance(col, VariableColumn) else col) for col in columns]
 
             missing_cols = [col for col in resolved_cols if col not in dp]
             if len(missing_cols) > 0:
-                raise ValueError(
-                    f"DataPanel passed to `{fn.__qualname__}` at argument `{dp_arg}` "
-                    f"is missing required columns `{missing_cols}`."
-                )
+                raise ValueError(f"DataPanel passed to `{fn.__qualname__}` at argument `{dp_arg}` "
+                                 f"is missing required columns `{missing_cols}`.")
             args_dict[dp_arg] = dp
             return fn(**args_dict)
 

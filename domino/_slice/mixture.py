@@ -9,10 +9,11 @@ import numpy as np
 import sklearn.cluster as cluster
 from scipy import linalg
 from scipy.special import logsumexp
+from sklearn.utils import check_array
 from sklearn.decomposition import PCA
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.mixture import GaussianMixture
-from sklearn.mixture._base import _check_X, check_random_state
+from sklearn.mixture._base import check_random_state
 from sklearn.mixture._gaussian_mixture import (
     _compute_precision_cholesky,
     _estimate_gaussian_covariances_diag,
@@ -30,7 +31,6 @@ from .abstract import Slicer
 
 
 class MixtureSlicer(Slicer):
-
     r"""
     Slice Discovery based on the Domino Mixture Model.
 
@@ -265,22 +265,19 @@ class MixtureSlicer(Slicer):
         Returns:
             MixtureSlicer: Returns a fit instance of MixtureSlicer.
         """
-        embeddings, targets, pred_probs = unpack_args(
-            data, embeddings, targets, pred_probs
-        )
-        embeddings, targets, pred_probs = convert_to_numpy(
-            embeddings, targets, pred_probs
-        )
+        embeddings, targets, pred_probs = unpack_args(data, embeddings, targets, pred_probs)
+        embeddings, targets, pred_probs = convert_to_numpy(embeddings, targets, pred_probs)
 
+        print(f"Using PCA units: {self.pca}")
         if self.pca is not None:
             self.pca.fit(X=embeddings)
             embeddings = self.pca.transform(X=embeddings)
-        
+
+        get_shape("before mm.fit", embeddings, pred_probs, targets)
         self.mm.fit(X=embeddings, y=targets, y_hat=pred_probs)
 
-        self.slice_cluster_indices = (
-            -np.abs((self.mm.y_hat_probs - self.mm.y_probs).max(axis=1))
-        ).argsort()[: self.config.n_slices]
+        self.slice_cluster_indices = (-np.abs(
+            (self.mm.y_hat_probs - self.mm.y_probs).max(axis=1))).argsort()[:self.config.n_slices]
         return self
 
     def predict(
@@ -332,14 +329,12 @@ class MixtureSlicer(Slicer):
         preds[np.arange(preds.shape[0]), probs.argmax(axis=-1)] = 1
         return preds
 
-    def predict_proba(
-        self,
-        data: Union[dict, mk.DataPanel] = None,
-        embeddings: Union[str, np.ndarray] = "embedding",
-        targets: Union[str, np.ndarray] = "target",
-        pred_probs: Union[str, np.ndarray] = "pred_probs",
-        losses: Union[str, np.ndarray] = "loss"
-    ) -> np.ndarray:
+    def predict_proba(self,
+                      data: Union[dict, mk.DataPanel] = None,
+                      embeddings: Union[str, np.ndarray] = "embedding",
+                      targets: Union[str, np.ndarray] = "target",
+                      pred_probs: Union[str, np.ndarray] = "pred_probs",
+                      losses: Union[str, np.ndarray] = "loss") -> np.ndarray:
         """
         Get probabilistic slice membership for data using a fit mixture model.
 
@@ -371,12 +366,8 @@ class MixtureSlicer(Slicer):
             np.ndarray: A ``np.ndarray`` of shape (n_samples, n_slices) where values in
                 are in range [0,1] and rows sum to 1.
         """
-        embeddings, targets, pred_probs = unpack_args(
-            data, embeddings, targets, pred_probs
-        )
-        embeddings, targets, pred_probs = convert_to_numpy(
-            embeddings, targets, pred_probs
-        )
+        embeddings, targets, pred_probs = unpack_args(data, embeddings, targets, pred_probs)
+        embeddings, targets, pred_probs = convert_to_numpy(embeddings, targets, pred_probs)
 
         if self.pca is not None:
             embeddings = self.pca.transform(X=embeddings)
@@ -387,6 +378,7 @@ class MixtureSlicer(Slicer):
 
 
 class DominoMixture(GaussianMixture):
+
     @wraps(GaussianMixture.__init__)
     def __init__(
         self,
@@ -418,13 +410,7 @@ class DominoMixture(GaussianMixture):
 
         if self.init_params == "kmeans":
             resp = np.zeros((n_samples, self.n_components))
-            label = (
-                cluster.KMeans(
-                    n_clusters=self.n_components, n_init=1, random_state=random_state
-                )
-                .fit(X)
-                .labels_
-            )
+            label = (cluster.KMeans(n_clusters=self.n_components, n_init=1, random_state=random_state).fit(X).labels_)
             resp[np.arange(n_samples), label] = 1
         elif self.init_params == "random":
             resp = random_state.rand(n_samples, self.n_components)
@@ -432,32 +418,19 @@ class DominoMixture(GaussianMixture):
         elif self.init_params == "confusion":
             num_classes = y.shape[-1]
             if self.n_components < num_classes**2:
-                raise ValueError(
-                    "Can't use 'init_params=\"confusion\"' when "
-                    "`n_components` < `num_classes **2`"
-                )
-            resp = np.matmul(y[:, :, np.newaxis], y_hat[:, np.newaxis, :]).reshape(
-                len(y), -1
-            )
+                raise ValueError("Can't use 'init_params=\"confusion\"' when " "`n_components` < `num_classes **2`")
+            resp = np.matmul(y[:, :, np.newaxis], y_hat[:, np.newaxis, :]).reshape(len(y), -1)
             resp = np.concatenate(
-                [resp]
-                * (
-                    int(self.n_components / (num_classes**2))
-                    + (self.n_components % (num_classes**2) > 0)
-                ),
+                [resp] * (int(self.n_components / (num_classes**2)) + (self.n_components % (num_classes**2) > 0)),
                 axis=1,
-            )[:, : self.n_components]
+            )[:, :self.n_components]
             resp /= resp.sum(axis=1)[:, np.newaxis]
 
-            resp += (
-                random_state.rand(n_samples, self.n_components) * self.confusion_noise
-            )
+            resp += (random_state.rand(n_samples, self.n_components) * self.confusion_noise)
             resp /= resp.sum(axis=1)[:, np.newaxis]
 
         else:
-            raise ValueError(
-                "Unimplemented initialization method '%s'" % self.init_params
-            )
+            raise ValueError("Unimplemented initialization method '%s'" % self.init_params)
 
         self._initialize(X, y, y_hat, resp)
 
@@ -470,32 +443,58 @@ class DominoMixture(GaussianMixture):
         """
         n_samples, _ = X.shape
 
-        weights, means, covariances, y_probs, y_hat_probs = _estimate_parameters(
-            X, y, y_hat, resp, self.reg_covar, self.covariance_type
-        )
+        # weights, means, covariances, y_probs, y_hat_probs = _estimate_parameters(X, y, y_hat, resp, self.reg_covar,
+        #                                                                          self.covariance_type)
+        weights, means, covariances = _estimate_parameters_multi_gmm(X, y, y_hat, resp, self.reg_covar,
+                                                                     self.covariance_type)
         weights /= n_samples
 
         self.weights_ = weights if self.weights_init is None else self.weights_init
-        self.means_ = means if self.means_init is None else self.means_init
-        self.y_probs, self.y_hat_probs = y_probs, y_hat_probs
+        self.means = means if self.means_init is None else self.means_init
+        self.means_ = self.means[0]
+        self.y_probs, self.y_hat_probs = None, None
         if self.precisions_init is None:
-            self.covariances_ = covariances
-            self.precisions_cholesky_ = _compute_precision_cholesky(
-                covariances, self.covariance_type
-            )
+            self.covariances = covariances
+            self.covariances_ = covariances[0]
+            self.precisions_cholesky = [_compute_precision_cholesky(x, self.covariance_type) for x in covariances]
+            self.precisions_cholesky_ = _compute_precision_cholesky(covariances[0], self.covariance_type)
         elif self.covariance_type == "full":
             self.precisions_cholesky_ = np.array(
-                [
-                    linalg.cholesky(prec_init, lower=True)
-                    for prec_init in self.precisions_init
-                ]
-            )
+                [linalg.cholesky(prec_init, lower=True) for prec_init in self.precisions_init])
         elif self.covariance_type == "tied":
-            self.precisions_cholesky_ = linalg.cholesky(
-                self.precisions_init, lower=True
-            )
+            self.precisions_cholesky_ = linalg.cholesky(self.precisions_init, lower=True)
         else:
             self.precisions_cholesky_ = self.precisions_init
+
+    def _check_initial_parameters(self, X):
+        """Check values of the basic parameters.
+
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+        """
+        if self.n_components < 1:
+            raise ValueError("Invalid value for 'n_components': %d "
+                             "Estimation requires at least one component" % self.n_components)
+
+        if self.tol < 0.:
+            raise ValueError("Invalid value for 'tol': %.5f "
+                             "Tolerance used by the EM must be non-negative" % self.tol)
+
+        if self.n_init < 1:
+            raise ValueError("Invalid value for 'n_init': %d " "Estimation requires at least one run" % self.n_init)
+
+        if self.max_iter < 1:
+            raise ValueError("Invalid value for 'max_iter': %d "
+                             "Estimation requires at least one iteration" % self.max_iter)
+
+        if self.reg_covar < 0.:
+            raise ValueError("Invalid value for 'reg_covar': %.5f "
+                             "regularization on covariance must be "
+                             "non-negative" % self.reg_covar)
+
+        # Check all the parameters values of the derived class
+        self._check_parameters(X)
 
     def fit(self, X, y, y_hat):
 
@@ -517,10 +516,22 @@ class DominoMixture(GaussianMixture):
                 y_hat = np.array([1 - y_hat, y_hat]).T
         return y, y_hat
 
-    def fit_predict(self, X, y, y_hat):
-        y, y_hat = self._preprocess_ys(y, y_hat)
+    def _preprocess_extras(self, extra: np.ndarray = None):
+        if extra is None:
+            return extra
+        if extra.ndim == 1:
+            extra = extra[:, np.newaxis]
+        return extra
 
-        X = _check_X(X, self.n_components, ensure_min_samples=2)
+    def fit_predict(self, X, y, y_hat):
+        # y, y_hat = self._preprocess_ys(y, y_hat)
+        if y is not None:
+            y = self._preprocess_extras(y)
+        if y_hat is not None:
+            y_hat = self._preprocess_extras(y_hat)
+        get_shape("after self._preprocess_extras", X, y_hat, y)
+
+        X = check_array(X, ensure_min_features=self.n_components, ensure_min_samples=2)
         self._check_n_features(X, reset=True)
         self._check_initial_parameters(X)
 
@@ -543,14 +554,13 @@ class DominoMixture(GaussianMixture):
 
             lower_bound = -np.infty if do_init else self.lower_bound_
 
-            for n_iter in tqdm(
-                range(1, self.max_iter + 1), colour="#f17a4a", disable=not self.pbar
-            ):
+            for n_iter in tqdm(range(1, self.max_iter + 1), colour="#f17a4a", disable=not self.pbar):
                 prev_lower_bound = lower_bound
 
                 log_prob_norm, log_resp = self._e_step(X, y, y_hat)
                 if np.isnan(log_resp).any():
-                    import pdb; pdb.set_trace()
+                    import pdb
+                    pdb.set_trace()
 
                 self._m_step(X, y, y_hat, log_resp)
                 lower_bound = self._compute_lower_bound(log_resp, log_prob_norm)
@@ -590,13 +600,11 @@ class DominoMixture(GaussianMixture):
 
         return log_resp.argmax(axis=1)
 
-    def predict_proba(
-        self, X: np.ndarray, y: np.ndarray = None, y_hat: np.ndarray = None
-    ):
+    def predict_proba(self, X: np.ndarray, y: np.ndarray = None, y_hat: np.ndarray = None):
         y, y_hat = self._preprocess_ys(y, y_hat)
 
         check_is_fitted(self)
-        X = _check_X(X, None, self.means_.shape[1])
+        # X = _check_X(X, None, self.means_.shape[1])
         _, log_resp = self._estimate_log_prob_resp(X, y, y_hat)
         return np.exp(log_resp)
 
@@ -617,13 +625,9 @@ class DominoMixture(GaussianMixture):
             self.covariances_,
             self.y_probs,
             self.y_hat_probs,
-        ) = _estimate_parameters(
-            X, y, y_hat, resp, self.reg_covar, self.covariance_type
-        )
+        ) = _estimate_parameters(X, y, y_hat, resp, self.reg_covar, self.covariance_type)
         self.weights_ /= n_samples
-        self.precisions_cholesky_ = _compute_precision_cholesky(
-            self.covariances_, self.covariance_type
-        )
+        self.precisions_cholesky_ = _compute_precision_cholesky(self.covariances_, self.covariance_type)
 
     def _e_step(self, X, y, y_hat):
         """E step.
@@ -670,16 +674,24 @@ class DominoMixture(GaussianMixture):
             log_resp = weighted_log_prob - log_prob_norm[:, np.newaxis]
         return log_prob_norm, log_resp
 
+    def _estimate_log_prob_custom(self, y, i):
+        self.means_ = self.means[i]
+        self.covariances_ = self.covariances[i]
+        self.precisions_cholesky_ = self.precisions_cholesky[i]
+        value = self._estimate_log_prob(y)
+        self.means_ = self.means[0]
+        self.covariances_ = self.covariances[0]
+        self.precisions_cholesky_ = self.precisions_cholesky[0]
+        return value
+
     def _estimate_weighted_log_prob(self, X, y=None, y_hat=None):
         log_prob = self._estimate_log_prob(X) + self._estimate_log_weights()
 
         if y is not None:
-            log_prob += self._estimate_y_log_prob(y) * self.y_log_likelihood_weight
+            log_prob += self._estimate_log_prob_custom(y, 1) * self.y_log_likelihood_weight
 
         if y_hat is not None:
-            log_prob += (
-                self._estimate_y_hat_log_prob(y_hat) * self.y_hat_log_likelihood_weight
-            )
+            log_prob += self._estimate_log_prob_custom(y_hat, 2) * self.y_hat_log_likelihood_weight
 
         return log_prob
 
@@ -712,9 +724,7 @@ class DominoMixture(GaussianMixture):
                 self.precisions_[k] = np.dot(prec_chol, prec_chol.T)
 
         elif self.covariance_type == "tied":
-            self.precisions_ = np.dot(
-                self.precisions_cholesky_, self.precisions_cholesky_.T
-            )
+            self.precisions_ = np.dot(self.precisions_cholesky_, self.precisions_cholesky_.T)
         else:
             self.precisions_ = self.precisions_cholesky_**2
 
@@ -745,11 +755,49 @@ class DominoMixture(GaussianMixture):
         """
         # add epsilon to avoid "RuntimeWarning: divide by zero encountered in log"
         if (np.dot(y_hat, self.y_hat_probs.T) + np.finfo(self.y_hat_probs.dtype).eps < 0).any():
-            import pdb; pdb.set_trace()
-        
-        return np.log(
-            np.dot(y_hat, self.y_hat_probs.T) + np.finfo(self.y_hat_probs.dtype).eps
-        )
+            import pdb
+            pdb.set_trace()
+
+        return np.log(np.dot(y_hat, self.y_hat_probs.T) + np.finfo(self.y_hat_probs.dtype).eps)
+
+
+def _estimate_parameters_multi_gmm(X, y, z, resp, reg_covar, covariance_type):
+    nk = resp.sum(axis=0) + 10 * np.finfo(resp.dtype).eps  # (n_components, )
+    means, covariances = [], []
+
+    X_means = np.dot(resp.T, X) / nk[:, np.newaxis]
+    X_covariances = {
+        "full": _estimate_gaussian_covariances_full,
+        "tied": _estimate_gaussian_covariances_tied,
+        "diag": _estimate_gaussian_covariances_diag,
+        "spherical": _estimate_gaussian_covariances_spherical,
+    }[covariance_type](resp, X, nk, X_means, reg_covar)
+    means.append(X_means)
+    covariances.append(X_covariances)
+
+    if y is not None:
+        y_means = np.dot(resp.T, y) / nk[:, np.newaxis]  # (n_components, n_classes)
+        y_covariances = {
+            "full": _estimate_gaussian_covariances_full,
+            "tied": _estimate_gaussian_covariances_tied,
+            "diag": _estimate_gaussian_covariances_diag,
+            "spherical": _estimate_gaussian_covariances_spherical,
+        }[covariance_type](resp, y, nk, y_means, reg_covar)
+        means.append(y_means)
+        covariances.append(y_covariances)
+
+    if z is not None:
+        z_means = np.dot(resp.T, z) / nk[:, np.newaxis]  # (n_components, n_classes)
+        z_covariances = {
+            "full": _estimate_gaussian_covariances_full,
+            "tied": _estimate_gaussian_covariances_tied,
+            "diag": _estimate_gaussian_covariances_diag,
+            "spherical": _estimate_gaussian_covariances_spherical,
+        }[covariance_type](resp, z, nk, z_means, reg_covar)
+        means.append(z_means)
+        covariances.append(z_covariances)
+
+    return nk, means, covariances
 
 
 def _estimate_parameters(X, y, y_hat, resp, reg_covar, covariance_type):
@@ -798,5 +846,12 @@ def _estimate_parameters(X, y, y_hat, resp, reg_covar, covariance_type):
     y_hat_probs = np.dot(resp.T, y_hat) / nk[:, np.newaxis]  # (n_components, n_classes)
 
     return nk, means, covariances, y_probs, y_hat_probs
+
+
+def get_shape(prefix, embeddings, pred_probs, targets):
+    pred_probs_shape = pred_probs.shape if pred_probs is not None else None
+    targets_shape = targets.shape if targets is not None else None
+    print(f"{prefix}: {embeddings.shape} {pred_probs_shape} {targets_shape}")
+
 
 DominoSlicer = MixtureSlicer

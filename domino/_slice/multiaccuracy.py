@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import datetime
 from dataclasses import dataclass
 from typing import Union
@@ -10,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from meerkat.columns.tensor_column import TensorColumn
+from meerkat.columns.tensor.abstract import TensorColumn
 from sklearn.linear_model import Ridge
 from sklearn.metrics import roc_auc_score
 from torch.nn.functional import cross_entropy
@@ -23,7 +22,6 @@ from .abstract import Slicer
 
 
 class MultiaccuracySlicer(Slicer):
-
     r"""
     Slice discovery based on MultiAccuracy auditing [kim_2019].
 
@@ -90,8 +88,8 @@ class MultiaccuracySlicer(Slicer):
         self.config.partition_size_threshold = partition_size_threshold
 
         self.auditors = []
-        
-        self.pbar = pbar 
+
+        self.pbar = pbar
 
     def fit(
         self,
@@ -124,12 +122,8 @@ class MultiaccuracySlicer(Slicer):
         Returns:
             MultiaccuracySlicer: Returns a fit instance of MultiaccuracySlicer.
         """
-        embeddings, targets, pred_probs = unpack_args(
-            data, embeddings, targets, pred_probs
-        )
-        embeddings, targets, pred_probs = convert_to_numpy(
-            embeddings, targets, pred_probs
-        )
+        embeddings, targets, pred_probs = unpack_args(data, embeddings, targets, pred_probs)
+        embeddings, targets, pred_probs = convert_to_numpy(embeddings, targets, pred_probs)
 
         pred_probs = pred_probs[:, 1] if pred_probs.ndim > 1 else pred_probs
 
@@ -154,33 +148,22 @@ class MultiaccuracySlicer(Slicer):
                 # derivative of the cross entropy loss with respect to predictions
                 partition_dev_train = np.where(partition[dev_train_idxs] == 1)[0]
                 partition_dev_valid = np.where(partition[dev_valid_idxs] == 1)[0]
-                if (
-                    len(partition_dev_train) < self.config.partition_size_threshold
-                ) or (len(partition_dev_valid) < self.config.partition_size_threshold):
+                if (len(partition_dev_train) < self.config.partition_size_threshold) or (
+                        len(partition_dev_valid) < self.config.partition_size_threshold):
                     continue
                 rr = Ridge(alpha=1)
                 rr.fit(
                     embeddings[dev_train_idxs][partition_dev_train],
                     delta[dev_train_idxs][partition_dev_train],
                 )
-                rr_prediction = rr.predict(
-                    embeddings[dev_valid_idxs][partition_dev_valid]
-                )
+                rr_prediction = rr.predict(embeddings[dev_valid_idxs][partition_dev_valid])
 
                 candidate_auditors.append(rr)
-                corrs.append(
-                    np.mean(
-                        rr_prediction
-                        * np.abs(residual[dev_valid_idxs][partition_dev_valid])
-                    )
-                )
+                corrs.append(np.mean(rr_prediction * np.abs(residual[dev_valid_idxs][partition_dev_valid])))
 
             partition_idx = np.argmax(corrs)
             auditor = candidate_auditors[partition_idx]
-            h = (
-                np.matmul(embeddings, np.expand_dims(auditor.coef_, -1))[:, 0]
-                + auditor.intercept_
-            )
+            h = (np.matmul(embeddings, np.expand_dims(auditor.coef_, -1))[:, 0] + auditor.intercept_)
             if partition_idx == 0:
                 logits += self.config.eta * h * partitions[partition_idx]
             else:
@@ -278,10 +261,7 @@ class MultiaccuracySlicer(Slicer):
         all_weights = []
         for slice_idx in range(self.config.n_slices):
             auditor = self.auditors[slice_idx]
-            h = (
-                np.matmul(embeddings, np.expand_dims(auditor.coef_, -1))[:, 0]
-                + auditor.intercept_
-            )
+            h = (np.matmul(embeddings, np.expand_dims(auditor.coef_, -1))[:, 0] + auditor.intercept_)
             all_weights.append(h)
         pred_slices = np.stack(all_weights, axis=1)
         max_scores = np.max(pred_slices, axis=0)
@@ -300,14 +280,10 @@ class MultiaccuracySlicer(Slicer):
 
     def _split_data(self, data):
         ratio = [1 - self.config.dev_valid_frac, self.config.dev_valid_frac]
-        num = (
-            data[0].shape[0]
-            if type(data) == list or type(data) == tuple
-            else data.shape[0]
-        )
+        num = (data[0].shape[0] if type(data) == list or type(data) == tuple else data.shape[0])
         idx = np.arange(num)
-        idx_train = idx[: int(ratio[0] * num)]
-        idx_val = idx[int(ratio[0] * num) : int((ratio[0] + ratio[1]) * num)]
+        idx_train = idx[:int(ratio[0] * num)]
+        idx_val = idx[int(ratio[0] * num):int((ratio[0] + ratio[1]) * num)]
         train = data[idx_train]
         val = data[idx_val]
         return train, val
