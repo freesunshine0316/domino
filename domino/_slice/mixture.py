@@ -274,11 +274,11 @@ class MixtureSlicer(Slicer):
             embeddings = self.pca.transform(X=embeddings)
 
         get_shape("before mm.fit", embeddings, pred_probs, targets)
-        self.mm.fit(X=embeddings, y=targets, y_hat=pred_probs)
+        return self.mm.fit(X=embeddings, y=targets, y_hat=pred_probs)
 
-        self.slice_cluster_indices = (-np.abs(
-            (self.mm.y_hat_probs - self.mm.y_probs).max(axis=1))).argsort()[:self.config.n_slices]
-        return self
+        # self.slice_cluster_indices = (-np.abs(
+        #     (self.mm.y_hat_probs - self.mm.y_probs).max(axis=1))).argsort()[:self.config.n_slices]
+        # return self
 
     def predict(
         self,
@@ -498,8 +498,8 @@ class DominoMixture(GaussianMixture):
 
     def fit(self, X, y, y_hat):
 
-        self.fit_predict(X, y, y_hat)
-        return self
+        return self.fit_predict(X, y, y_hat)
+        # return self
 
     def _preprocess_ys(self, y: np.ndarray = None, y_hat: np.ndarray = None):
         if y is not None:
